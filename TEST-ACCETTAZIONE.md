@@ -1,5 +1,9 @@
 # Test di accettazione — Fase 1
 
+## Comportamento confermato della piattaforma (importante prima di leggere i criteri sotto)
+
+Verificato empiricamente il primo giorno di test: gli agenti **non rispondono automaticamente a ogni messaggio del canale**. Vanno menzionati esplicitamente (`@NomeAgente`) per attivarsi — senza tag non succede nulla, nemmeno silenziosamente in background. Questo significa che, perché due agenti dialoghino davvero, o li tagghi entrambi tu nello stesso messaggio, oppure ciascuno tagga l'altro nella propria risposta quando è rilevante farlo intervenire (soluzione preferibile, coerente con "nessun coordinatore esterno" — vedi persona docs). Le risposte compaiono inoltre in **thread separati** collegati al messaggio scatenante, non in sequenza nel canale principale: è il comportamento normale dell'interfaccia, non un segnale di monologhi isolati — per verificare se davvero dialogano bisogna aprire il thread specifico dove si citano a vicenda, non solo guardare il canale principale.
+
 ## Scenario
 
 In `#consulto`, scrivi:
@@ -20,7 +24,8 @@ Non basta che entrambi gli agenti rispondano. Deve esserci uno **scambio reale**
 
 Il problema è nelle persone (`agents/*.persona.md`), non nella piattaforma. Prima di toccare altro, controlla in quest'ordine:
 
-- **Se i due agenti non si leggono a vicenda**: verifica che entrambi siano davvero membri di `#consulto` (non solo in DM separati), e prova a taggare esplicitamente l'altro agente nel messaggio per forzare la lettura reciproca (es. "@Nutrizionista cosa ne pensi di quello che ha detto il Trainer?"). Se con il tag funziona ma senza no, il problema è nel meccanismo di attivazione dell'agente (quali messaggi legge/a cui risponde), non nel testo della persona.
+- **Se i due agenti non rispondono affatto**: quasi certamente non sono stati menzionati con `@`. Non è un problema di persona, è il meccanismo di attivazione della piattaforma (vedi nota in cima al documento).
+- **Se rispondono solo quando taggati da te, ma non si taggano mai a vicenda**: qui sì che è un problema di persona — nella sezione "Cosa fai sempre"/"Quando passa la palla" va reso più esplicito che l'agente deve menzionare l'altro quando la risposta riguarda la sua competenza, non solo descriverla in astratto.
 - **Se rispondono ma senza mai contraddirsi**: la sezione "Tono" e "Quando passa la palla" delle persone va resa più tagliente — probabilmente il modello sta smussando il disaccordo di default. Prova ad aggiungere un esempio concreto di disaccordo nel testo della persona.
 - **Se inventano dati che non hanno**: rinforza la sezione "Cosa fai sempre" ribadendo il divieto di inventare numeri, con un esempio esplicito di come rifiutarsi ("non ho i tuoi dati, dimmeli tu" invece di stimare un numero plausibile).
 - **Se sono generici e intercambiabili**: il problema è nel "Metodo e scuola di pensiero" — va reso più specifico e meno riassumibile in una frase da manuale.
