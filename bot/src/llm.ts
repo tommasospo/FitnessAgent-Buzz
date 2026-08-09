@@ -1,0 +1,41 @@
+import OpenAI from 'openai'
+import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions'
+import { env } from './env.js'
+import { openAiTools, eseguiTool } from './tools-bridge.js'
+
+const openai = new OpenAI({ apiKey: env.openaiApiKey })
+
+const MAX_TOOL_ITERATIONS = 6
+
+export async function rispondi(systemPrompt: string, messaggioUtente: string): Promise<string> {
+  const messages: ChatCompletionMessageParam[] = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: messaggioUtente },
+  ]
+
+  for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
+    const completion = await openai.chat.completions.create({
+      model: env.openaiModel,
+      messages,
+      tools: openAiTools,
+      reasoning_effort: 'none',
+    })
+
+    const choice = completion.choices[0]
+    const message = choice.message
+
+    if (!message.tool_calls || message.tool_calls.length === 0) {
+      return message.content ?? '(nessuna risposta)'
+    }
+
+    messages.push(message)
+
+    for (const toolCall of message.tool_calls) {
+      if (toolCall.type !== 'function') continue
+      const result = await eseguiTool(toolCall.function.name, toolCall.function.arguments)
+      messages.push({ role: 'tool', tool_call_id: toolCall.id, content: result })
+    }
+  }
+
+  return 'Mi servono troppi passaggi per rispondere a questa domanda, riprova con una richiesta più specifica.'
+}

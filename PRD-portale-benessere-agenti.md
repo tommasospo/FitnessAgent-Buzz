@@ -94,7 +94,7 @@ Tre livelli, con un confine netto tra loro.
               ┌─────────────┴─────────────┐
               │      INGESTIONE           │
               │                           │
-              │ connettori (Garmin/Strava)│
+              │ connettori (apple health) │
               │ cartella Drive (CSV, PDF) │
               └───────────────────────────┘
 ```
@@ -449,3 +449,5 @@ Le quattordici scelte prese in fase di intervista, con la motivazione.
 | 12 | Prescritto ≠ eseguito, mai sovrascritti | La differenza tra i due è il segnale che alimenta tutto |
 | 13 | Log veloce + note libere; il "perché" lo chiedono gli agenti | Attrito dove c'è tempo, non dove non ce n'è |
 | 14 | Approvazione via `/approva` in Buzz, badge passivo nell'app | Un solo luogo di decisione, con un promemoria dove ti alleni |
+
+Per lanciare buzz: cd "/Applications/Self Developed Applications/wellbeing-agents/buzz" && ./start-buzz.sh

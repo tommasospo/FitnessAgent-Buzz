@@ -1,0 +1,24 @@
+{
+  "name": "benessere-mcp-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Tool MCP per gli agenti Buzz (PT, Nutrizionista): lettura/scrittura sul database Supabase del portale benessere.",
+  "bin": {
+    "benessere-mcp-server": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "@supabase/supabase-js": "^2.112.2",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}
