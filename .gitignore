@@ -1,2 +1,5 @@
 .DS_Store
 .claude/settings.local.json
+
+# Scratch / working files (session handoff notes)
+tmp/

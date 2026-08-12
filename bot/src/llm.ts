@@ -7,11 +7,8 @@ const openai = new OpenAI({ apiKey: env.openaiApiKey })
 
 const MAX_TOOL_ITERATIONS = 6
 
-export async function rispondi(systemPrompt: string, messaggioUtente: string): Promise<string> {
-  const messages: ChatCompletionMessageParam[] = [
-    { role: 'system', content: systemPrompt },
-    { role: 'user', content: messaggioUtente },
-  ]
+export async function rispondi(systemPrompt: string, cronologia: ChatCompletionMessageParam[]): Promise<string> {
+  const messages: ChatCompletionMessageParam[] = [{ role: 'system', content: systemPrompt }, ...cronologia]
 
   for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
     const completion = await openai.chat.completions.create({

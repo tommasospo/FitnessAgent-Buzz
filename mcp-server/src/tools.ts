@@ -12,14 +12,19 @@ import { env } from './env.js'
 // sessione_eseguita, metrica_corporea, marker_ematico — l'agente non può
 // modificare un piano attivo né cancellare dati storici, per costruzione.
 
-const esercizioSchema = z.object({
-  nome: z.string(),
-  serie: z.number().int().positive(),
-  ripetizioni: z.number().int().positive(),
-  carico: z.number().optional(),
-  recupero_secondi: z.number().int().optional(),
-  note: z.string().optional(),
-})
+const esercizioSchema = z
+  .object({
+    nome: z.string(),
+    serie: z.number().int().positive(),
+    ripetizioni: z.number().int().positive().optional(),
+    secondi: z.number().int().positive().optional(),
+    carico: z.number().optional(),
+    recupero_secondi: z.number().int().optional(),
+    note: z.string().optional(),
+  })
+  .refine((e) => (e.ripetizioni !== undefined) !== (e.secondi !== undefined), {
+    message: 'Specifica esattamente uno tra ripetizioni e secondi (a seconda che l\'esercizio sia a ripetizioni o a tempo).',
+  })
 
 const sessionePrescrittaInputSchema = z.object({
   data_prevista: z.string().describe('Data ISO (YYYY-MM-DD)'),
@@ -197,7 +202,7 @@ export const tools = [
   {
     name: 'proponi_piano',
     description:
-      "Crea una NUOVA PROPOSTA di piano (mai attiva: solo l'utente attiva un piano, in Buzz con /approva). " +
+      "Crea una NUOVA PROPOSTA di piano (mai attiva: solo l'utente può attivarla, dall'app — sezione Schede, non in chat). " +
       'Calcola automaticamente la versione e il collegamento al piano precedente. Puoi allegare subito le sessioni prescritte (per allenamento).',
     inputSchema: {
       tipo: z.enum(['allenamento', 'nutrizione']),
