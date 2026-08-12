@@ -3,3 +3,6 @@
 
 # Scratch / working files (session handoff notes)
 tmp/
+
+# Supabase CLI local cache
+supabase/.temp/
