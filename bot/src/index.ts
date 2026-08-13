@@ -1,8 +1,8 @@
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions'
 import { env } from './env.js'
-import { BuzzRelayClient, threadRootId, type ChannelMessage } from './relay.js'
+import { BuzzRelayClient, type ChannelMessage } from './relay.js'
 import { loadPersona } from './persona.js'
-import { rispondi } from './llm.js'
+import { rispondi, dovreiRispondere } from './llm.js'
 
 const systemPrompt = loadPersona(env.personaPath)
 
@@ -13,20 +13,24 @@ function eIndirizzatoAMe(event: ChannelMessage): boolean {
   return event.tags.some((tag) => tag[0] === 'p' && tag[1] === client.publicKeyHex)
 }
 
-// Cronologia per thread (chiave: id della radice, vedi threadRootId), così l'agente vede l'intero
-// scambio invece di trattare ogni menzione come una richiesta isolata senza memoria di quanto detto
-// prima nello stesso thread — comprese le battute dell'altro agente, non solo quelle dell'utente.
-// Copre solo i messaggi osservati da quando il bot è partito (niente storico pre-avvio) e vive in
-// memoria per processo: si perde a un riavvio, il che è accettabile per ora.
-const MAX_TURNI_PER_THREAD = 30
-const cronologiaPerThread = new Map<string, ChatCompletionMessageParam[]>()
+// Un altro agente bot nello stesso canale (es. PT vs Nutrizionista): a questi rispondiamo solo
+// su menzione esplicita, mai di iniziativa — altrimenti due agenti che si sentono entrambi "in
+// causa" sullo stesso messaggio potrebbero rispondersi a vicenda all'infinito.
+function eDaAltroAgente(event: ChannelMessage): boolean {
+  return env.peerAgentPubkeys.includes(event.pubkey)
+}
 
-function registraTurno(root: string, turno: ChatCompletionMessageParam): ChatCompletionMessageParam[] {
-  const storia = cronologiaPerThread.get(root) ?? []
-  storia.push(turno)
-  if (storia.length > MAX_TURNI_PER_THREAD) storia.splice(0, storia.length - MAX_TURNI_PER_THREAD)
-  cronologiaPerThread.set(root, storia)
-  return storia
+// Cronologia dell'intero canale (non più per-thread: le risposte sono messaggi piatti in
+// sequenza, non annidate in thread separati — vedi relay.ts publishReply). Dà comunque
+// all'agente memoria dello scambio in corso, comprese le battute dell'altro agente. Copre solo
+// i messaggi osservati da quando il bot è partito e vive in memoria per processo: si perde a un
+// riavvio, il che è accettabile per ora.
+const MAX_TURNI = 40
+let cronologiaCanale: ChatCompletionMessageParam[] = []
+
+function registraTurno(turno: ChatCompletionMessageParam): void {
+  cronologiaCanale.push(turno)
+  if (cronologiaCanale.length > MAX_TURNI) cronologiaCanale.splice(0, cronologiaCanale.length - MAX_TURNI)
 }
 
 async function main() {
@@ -46,17 +50,26 @@ async function main() {
 async function handleEvent(event: ChannelMessage) {
   if (event.pubkey === client.publicKeyHex) return // mai rispondere a sé stesso
 
-  const root = threadRootId(event)
   const mittente = event.pubkey.slice(0, 8)
-  const storia = registraTurno(root, { role: 'user', content: `[${mittente}] ${event.content}` })
+  registraTurno({ role: 'user', content: `[${mittente}] ${event.content}` })
 
-  // Serve comunque leggere ogni messaggio e tenerlo in cronologia (fatto sopra) per avere contesto
-  // quando l'agente viene poi taggato — ma risponde solo su @menzione esplicita.
-  if (!eIndirizzatoAMe(event)) return
+  // Serve comunque leggere ogni messaggio e tenerlo in cronologia (fatto sopra) per avere
+  // contesto anche quando l'agente decide di non intervenire.
+  const menzionato = eIndirizzatoAMe(event)
 
-  console.log(`[${env.agentName}] menzionato: "${event.content.slice(0, 80)}"`)
-  const risposta = await rispondi(systemPrompt, storia)
-  registraTurno(root, { role: 'assistant', content: risposta })
+  if (!menzionato) {
+    // Con un altro agente rispondiamo solo su menzione esplicita (vedi eDaAltroAgente).
+    if (eDaAltroAgente(event)) return
+
+    const vuoleIntervenire = await dovreiRispondere(systemPrompt, cronologiaCanale)
+    if (!vuoleIntervenire) return
+  }
+
+  console.log(
+    `[${env.agentName}] ${menzionato ? 'menzionato' : 'intervento spontaneo'}: "${event.content.slice(0, 80)}"`,
+  )
+  const risposta = await rispondi(systemPrompt, cronologiaCanale)
+  registraTurno({ role: 'assistant', content: risposta })
   await client.publishReply(env.channelId, event, risposta)
   console.log(`[${env.agentName}] risposta pubblicata`)
 }

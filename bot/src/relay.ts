@@ -20,15 +20,6 @@ export interface ChannelMessage {
   created_at: number
 }
 
-/** Radice del thread a cui appartiene l'evento (il suo tag 'e' marcato 'root', o 'reply' se manca il
- *  root, o l'id dell'evento stesso se non ha alcuna ancestry) — stessa risoluzione usata dal relay in
- *  resolve_nip10_thread_meta, utile per raggruppare la cronologia di una conversazione per thread. */
-export function threadRootId(event: ChannelMessage): string {
-  const rootTag = event.tags.find((t) => t[0] === 'e' && t[3] === 'root')
-  const replyTag = event.tags.find((t) => t[0] === 'e' && t[3] === 'reply')
-  return rootTag?.[1] ?? replyTag?.[1] ?? event.id
-}
-
 const RECONNECT_BASE_DELAY_MS = 1_000
 const RECONNECT_MAX_DELAY_MS = 30_000
 
@@ -261,24 +252,20 @@ export class BuzzRelayClient {
     )
   }
 
-  /** Pubblica una risposta nel canale, in risposta diretta al messaggio che l'ha attivata.
+  /** Pubblica una risposta nel canale come messaggio normale (nessun tag 'e' di thread/reply).
    *
-   * Il relay valida che il tag 'e' marcato 'root' corrisponda alla vera radice del thread
-   * (buzz-relay/src/handlers/ingest.rs, resolve_nip10_thread_meta): se il messaggio che ha
-   * attivato la risposta è già esso stesso dentro un thread (ha un proprio tag 'root' o
-   * 'reply'), dobbiamo propagare quella stessa radice, non limitarci a puntare al messaggio
-   * scatenante — altrimenti il relay rifiuta l'evento con "root tag does not match thread
-   * ancestry" e la risposta va persa in silenzio.
+   * Deliberato: taggare le risposte come reply di un messaggio scatenante le fa comparire nel
+   * client Buzz come thread separati (comportamento confermato in SETUP.md/TEST-ACCETTAZIONE.md
+   * per la piattaforma). Dato che i messaggi dell'utente che menzionano l'agente sono quasi
+   * sempre nuovi messaggi "radice" (non risposte esplicite a un messaggio precedente), ogni
+   * scambio finiva per aprire un thread nuovo invece di proseguire in sequenza nel canale.
+   * Il tag 'p' resta, per notificare comunque il destinatario.
    */
   async publishReply(channelId: string, triggerEvent: ChannelMessage, content: string): Promise<void> {
-    const rootId = threadRootId(triggerEvent)
-
-    const tags: string[][] = [['h', channelId]]
-    if (rootId !== triggerEvent.id) {
-      tags.push(['e', rootId, '', 'root'])
-    }
-    tags.push(['e', triggerEvent.id, '', 'reply'])
-    tags.push(['p', triggerEvent.pubkey])
+    const tags: string[][] = [
+      ['h', channelId],
+      ['p', triggerEvent.pubkey],
+    ]
 
     const event = this.sign({
       kind: KIND_CHANNEL_MESSAGE,
