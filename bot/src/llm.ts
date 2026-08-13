@@ -58,7 +58,7 @@ export async function dovreiRispondere(systemPrompt: string, cronologia: ChatCom
     model: env.openaiModel,
     messages,
     reasoning_effort: 'none',
-    max_tokens: 4,
+    max_completion_tokens: 4,
   })
 
   const testo = completion.choices[0]?.message?.content?.trim().toUpperCase() ?? 'NO'
