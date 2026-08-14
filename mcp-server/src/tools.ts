@@ -26,6 +26,8 @@ const esercizioSchema = z
     message: 'Specifica esattamente uno tra ripetizioni e secondi (a seconda che l\'esercizio sia a ripetizioni o a tempo).',
   })
 
+const memoriaCategoriaSchema = z.enum(['vincolo_fisico', 'preferenza', 'contesto_vita', 'stile_comunicazione', 'altro'])
+
 const sessionePrescrittaInputSchema = z.object({
   giorno_numero: z
     .number()
@@ -331,6 +333,68 @@ export const tools = [
           destinatario_id: sessione_eseguita_id,
           contenuto,
         })
+        .select('*')
+        .single()
+      if (error) throw new Error(error.message)
+      return data
+    },
+  },
+  {
+    name: 'leggi_memoria_persona',
+    description:
+      'Legge le note di sfondo salvate su una persona specifica: vincoli fisici, preferenze, contesto di vita, ' +
+      "stile di comunicazione. Non duplica obiettivi/misure/log (quelli hanno tool dedicate) — è conoscenza " +
+      'relazionale libera su chi ti sta parlando. Più recenti prima.',
+    inputSchema: {
+      pubkey_persona: z.string().describe('Pubkey Nostr della persona'),
+      categoria: memoriaCategoriaSchema.optional(),
+      limite: z.number().int().positive().max(50).default(20),
+    },
+    handler: async ({
+      pubkey_persona,
+      categoria,
+      limite,
+    }: {
+      pubkey_persona: string
+      categoria?: z.infer<typeof memoriaCategoriaSchema>
+      limite: number
+    }) => {
+      let query = supabase
+        .from('memoria_persona')
+        .select('*')
+        .eq('pubkey_persona', pubkey_persona)
+        .order('created_at', { ascending: false })
+        .limit(limite)
+      if (categoria) query = query.eq('categoria', categoria)
+      const { data, error } = await query
+      if (error) throw new Error(error.message)
+      return data
+    },
+  },
+  {
+    name: 'salva_memoria_persona',
+    description:
+      "Salva una nota di sfondo su una persona specifica — un vincolo fisico, una preferenza, un elemento di " +
+      "contesto di vita, o un'indicazione sullo stile di comunicazione che preferisce. Non usarlo per obiettivi " +
+      '(vedi proponi_piano) o per un commento su un log specifico (vedi annota_log): solo per conoscenza sulla ' +
+      "persona in sé, che vale a prescindere dalla singola conversazione o sessione.",
+    inputSchema: {
+      pubkey_persona: z.string().describe('Pubkey Nostr della persona'),
+      contenuto: z.string(),
+      categoria: memoriaCategoriaSchema,
+    },
+    handler: async ({
+      pubkey_persona,
+      contenuto,
+      categoria,
+    }: {
+      pubkey_persona: string
+      contenuto: string
+      categoria: z.infer<typeof memoriaCategoriaSchema>
+    }) => {
+      const { data, error } = await supabase
+        .from('memoria_persona')
+        .insert({ pubkey_persona, autore_agente: env.agentName, contenuto, categoria })
         .select('*')
         .single()
       if (error) throw new Error(error.message)

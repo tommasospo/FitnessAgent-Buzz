@@ -4,6 +4,7 @@ import { BuzzRelayClient, type ChannelMessage } from './relay.js'
 import { loadPersona } from './persona.js'
 import { rispondi, dovreiRispondere } from './llm.js'
 import { avviaSchedulerCheckin } from './checkin.js'
+import { recuperaProfiloCompatto } from './tools-bridge.js'
 
 const systemPrompt = loadPersona(env.personaPath)
 
@@ -82,7 +83,8 @@ async function handleEvent(event: ChannelMessage) {
   console.log(
     `[${env.agentName}] ${menzionato ? 'menzionato' : 'intervento spontaneo'}: "${event.content.slice(0, 80)}"`,
   )
-  const risposta = await rispondi(systemPrompt, cronologiaCanale)
+  const notaProfilo = await recuperaProfiloCompatto(event.pubkey).catch(() => null)
+  const risposta = await rispondi(systemPrompt, cronologiaCanale, { pubkeyCorrente: event.pubkey, notaProfilo })
   registraTurno({ role: 'assistant', content: risposta })
   await client.publishReply(env.channelId, event, risposta)
   console.log(`[${env.agentName}] risposta pubblicata`)

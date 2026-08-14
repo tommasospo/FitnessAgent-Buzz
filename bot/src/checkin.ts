@@ -3,7 +3,7 @@ import { supabase } from '../../mcp-server/src/supabase.js'
 import { env } from './env.js'
 import type { BuzzRelayClient } from './relay.js'
 import { rispondi } from './llm.js'
-import { eseguiTool } from './tools-bridge.js'
+import { eseguiTool, recuperaProfiloCompatto } from './tools-bridge.js'
 
 // Check-in privato settimanale (uno per bot, PT e Nutrizionista separatamente): feedback su
 // commenti scritti nel canale, aderenza ad allenamenti/nutrizione ed eventuali next step —
@@ -62,7 +62,11 @@ async function eseguiCheckSeENecessario(
   if (await giaInviatoQuestaSettimana()) return
 
   console.log(`[${env.agentName}] avvio check-in settimanale privato...`)
-  const messaggio = await rispondi(systemPrompt, [...cronologiaCanale, { role: 'user', content: PROMPT_CHECKIN }])
+  const notaProfilo = await recuperaProfiloCompatto(env.ownerPubkey).catch(() => null)
+  const messaggio = await rispondi(systemPrompt, [...cronologiaCanale, { role: 'user', content: PROMPT_CHECKIN }], {
+    pubkeyCorrente: env.ownerPubkey,
+    notaProfilo,
+  })
 
   const channelId = await client.apriDM(env.ownerPubkey)
   await client.inviaMessaggio(channelId, messaggio, env.ownerPubkey)

@@ -7,8 +7,16 @@ const openai = new OpenAI({ apiKey: env.openaiApiKey })
 
 const MAX_TOOL_ITERATIONS = 6
 
-export async function rispondi(systemPrompt: string, cronologia: ChatCompletionMessageParam[]): Promise<string> {
-  const messages: ChatCompletionMessageParam[] = [{ role: 'system', content: systemPrompt }, ...cronologia]
+export async function rispondi(
+  systemPrompt: string,
+  cronologia: ChatCompletionMessageParam[],
+  opts: { pubkeyCorrente?: string; notaProfilo?: string | null } = {},
+): Promise<string> {
+  const messages: ChatCompletionMessageParam[] = [
+    { role: 'system', content: systemPrompt },
+    ...(opts.notaProfilo ? [{ role: 'system', content: opts.notaProfilo } as ChatCompletionMessageParam] : []),
+    ...cronologia,
+  ]
 
   for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
     const completion = await openai.chat.completions.create({
@@ -29,7 +37,7 @@ export async function rispondi(systemPrompt: string, cronologia: ChatCompletionM
 
     for (const toolCall of message.tool_calls) {
       if (toolCall.type !== 'function') continue
-      const result = await eseguiTool(toolCall.function.name, toolCall.function.arguments)
+      const result = await eseguiTool(toolCall.function.name, toolCall.function.arguments, opts.pubkeyCorrente)
       messages.push({ role: 'tool', tool_call_id: toolCall.id, content: result })
     }
   }
