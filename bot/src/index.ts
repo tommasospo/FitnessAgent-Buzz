@@ -21,6 +21,14 @@ function eDaAltroAgente(event: ChannelMessage): boolean {
   return env.peerAgentPubkeys.includes(event.pubkey)
 }
 
+// L'utente ha @menzionato esplicitamente un altro agente (non me) in questo messaggio: la scelta
+// di chi debba rispondere è già stata fatta, non è ambigua — non va rimessa in discussione dal
+// giudizio spontaneo di dovreiRispondere, altrimenti l'agente non menzionato può comunque
+// intromettersi in una domanda diretta a qualcun altro.
+function eIndirizzatoAdAltroAgente(event: ChannelMessage): boolean {
+  return event.tags.some((tag) => tag[0] === 'p' && env.peerAgentPubkeys.includes(tag[1]))
+}
+
 // Cronologia dell'intero canale (non più per-thread: le risposte sono messaggi piatti in
 // sequenza, non annidate in thread separati — vedi relay.ts publishReply). Dà comunque
 // all'agente memoria dello scambio in corso, comprese le battute dell'altro agente. Copre solo
@@ -63,6 +71,9 @@ async function handleEvent(event: ChannelMessage) {
   if (!menzionato) {
     // Con un altro agente rispondiamo solo su menzione esplicita (vedi eDaAltroAgente).
     if (eDaAltroAgente(event)) return
+
+    // Già rivolto esplicitamente a un altro agente: non è una decisione mia da prendere.
+    if (eIndirizzatoAdAltroAgente(event)) return
 
     const vuoleIntervenire = await dovreiRispondere(systemPrompt, cronologiaCanale)
     if (!vuoleIntervenire) return
