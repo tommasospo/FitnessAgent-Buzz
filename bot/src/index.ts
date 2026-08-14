@@ -30,17 +30,19 @@ function eIndirizzatoAdAltroAgente(event: ChannelMessage): boolean {
   return event.tags.some((tag) => tag[0] === 'p' && env.peerAgentPubkeys.includes(tag[1]))
 }
 
-// Cronologia dell'intero canale (non più per-thread: le risposte sono messaggi piatti in
-// sequenza, non annidate in thread separati — vedi relay.ts publishReply). Dà comunque
-// all'agente memoria dello scambio in corso, comprese le battute dell'altro agente. Copre solo
-// i messaggi osservati da quando il bot è partito e vive in memoria per processo: si perde a un
-// riavvio, il che è accettabile per ora.
+// Cronologia per canale (gruppo + una per ogni DM) — non più un'unica cronologia condivisa, per
+// non far trapelare contenuto privato di una DM nel canale di gruppo (o viceversa). Non più
+// per-thread: le risposte sono messaggi piatti in sequenza, non annidate in thread separati (vedi
+// relay.ts publishReply). Copre solo i messaggi osservati da quando il bot è partito e vive in
+// memoria per processo: si perde a un riavvio, il che è accettabile per ora.
 const MAX_TURNI = 40
-let cronologiaCanale: ChatCompletionMessageParam[] = []
+const cronologiePerCanale = new Map<string, ChatCompletionMessageParam[]>()
 
-function registraTurno(turno: ChatCompletionMessageParam): void {
-  cronologiaCanale.push(turno)
-  if (cronologiaCanale.length > MAX_TURNI) cronologiaCanale.splice(0, cronologiaCanale.length - MAX_TURNI)
+function registraTurno(channelId: string, turno: ChatCompletionMessageParam): void {
+  const cronologia = cronologiePerCanale.get(channelId) ?? []
+  cronologia.push(turno)
+  if (cronologia.length > MAX_TURNI) cronologia.splice(0, cronologia.length - MAX_TURNI)
+  cronologiePerCanale.set(channelId, cronologia)
 }
 
 async function main() {
@@ -52,22 +54,40 @@ async function main() {
   console.log(`[${env.agentName}] profilo pubblicato`)
 
   client.subscribeChannel(env.channelId, (event) => {
-    handleEvent(event).catch((err) => console.error(`[${env.agentName}] errore gestendo evento:`, err))
+    handleEvent(event, env.channelId, false).catch((err) => console.error(`[${env.agentName}] errore gestendo evento:`, err))
   })
   console.log(`[${env.agentName}] in ascolto sul canale ${env.channelId}`)
 
-  avviaSchedulerCheckin(client, systemPrompt, () => cronologiaCanale)
+  // Scopre le DM di cui sono già membro e quelle aperte in futuro (da me o da altri) — senza
+  // questo, un messaggio privato non arriva mai al bot: non c'è modo di conoscerne il channel_id
+  // in anticipo, a differenza del canale di gruppo configurato via env.
+  client.scopriCanali((channelId) => {
+    console.log(`[${env.agentName}] nuovo canale scoperto: ${channelId}`)
+    // since:0 sulla prima sottoscrizione — recupera anche messaggi inviati prima che il bot se ne
+    // accorgesse (es. una DM aperta e scritta mentre il bot era temporaneamente disconnesso).
+    client.subscribeChannel(
+      channelId,
+      (event) => {
+        handleEvent(event, channelId, true).catch((err) => console.error(`[${env.agentName}] errore gestendo evento DM:`, err))
+      },
+      0,
+    )
+  })
+
+  avviaSchedulerCheckin(client, systemPrompt, () => cronologiePerCanale.get(env.channelId) ?? [])
 }
 
-async function handleEvent(event: ChannelMessage) {
+async function handleEvent(event: ChannelMessage, channelId: string, isDm: boolean) {
   if (event.pubkey === client.publicKeyHex) return // mai rispondere a sé stesso
 
   const mittente = event.pubkey.slice(0, 8)
-  registraTurno({ role: 'user', content: `[${mittente}] ${event.content}` })
+  registraTurno(channelId, { role: 'user', content: `[${mittente}] ${event.content}` })
 
   // Serve comunque leggere ogni messaggio e tenerlo in cronologia (fatto sopra) per avere
   // contesto anche quando l'agente decide di non intervenire.
-  const menzionato = eIndirizzatoAMe(event)
+  // In una DM 1:1 non c'è ambiguità su chi debba rispondere — sono l'unico destinatario, quindi
+  // rispondo sempre, senza passare dal giudizio spontaneo.
+  const menzionato = isDm || eIndirizzatoAMe(event)
 
   if (!menzionato) {
     // Con un altro agente rispondiamo solo su menzione esplicita (vedi eDaAltroAgente).
@@ -76,18 +96,21 @@ async function handleEvent(event: ChannelMessage) {
     // Già rivolto esplicitamente a un altro agente: non è una decisione mia da prendere.
     if (eIndirizzatoAdAltroAgente(event)) return
 
-    const vuoleIntervenire = await dovreiRispondere(systemPrompt, cronologiaCanale)
+    const vuoleIntervenire = await dovreiRispondere(systemPrompt, cronologiePerCanale.get(channelId) ?? [])
     if (!vuoleIntervenire) return
   }
 
   console.log(
-    `[${env.agentName}] ${menzionato ? 'menzionato' : 'intervento spontaneo'}: "${event.content.slice(0, 80)}"`,
+    `[${env.agentName}] ${isDm ? 'DM' : menzionato ? 'menzionato' : 'intervento spontaneo'}: "${event.content.slice(0, 80)}"`,
   )
   const notaProfilo = await recuperaProfiloCompatto(event.pubkey).catch(() => null)
-  const risposta = await rispondi(systemPrompt, cronologiaCanale, { pubkeyCorrente: event.pubkey, notaProfilo })
-  registraTurno({ role: 'assistant', content: risposta })
-  await client.publishReply(env.channelId, event, risposta)
-  console.log(`[${env.agentName}] risposta pubblicata`)
+  const risposta = await rispondi(systemPrompt, cronologiePerCanale.get(channelId) ?? [], {
+    pubkeyCorrente: event.pubkey,
+    notaProfilo,
+  })
+  registraTurno(channelId, { role: 'assistant', content: risposta })
+  await client.publishReply(channelId, event, risposta)
+  console.log(`[${env.agentName}] risposta pubblicata${isDm ? ' (DM)' : ''}`)
 }
 
 main().catch((err) => {

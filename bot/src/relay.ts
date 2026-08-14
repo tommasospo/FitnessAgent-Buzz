@@ -12,10 +12,14 @@ const KIND_PROFILE = 0
 const KIND_CHANNEL_MESSAGE = 9
 const KIND_AUTH = 22242
 const KIND_DM_OPEN = 41010
+const KIND_NIP29_GROUP_MEMBERS = 39002
+const KIND_MEMBER_ADDED_NOTIFICATION = 44100
+const KIND_MEMBER_REMOVED_NOTIFICATION = 44101
 
 export interface ChannelMessage {
   id: string
   pubkey: string
+  kind: number
   content: string
   tags: string[][]
   created_at: number
@@ -90,6 +94,7 @@ export class BuzzRelayClient {
       }
       this.onEventBySub.clear()
       for (const sub of this.channelSubs) this.sendSubscribeFrame(sub.channelId, sub.onMessage)
+      if (this.onCanaleTrovatoCallback) this.scopriCanali(this.onCanaleTrovatoCallback)
     }
   }
 
@@ -239,17 +244,65 @@ export class BuzzRelayClient {
 
   private onEventBySub = new Map<string, (event: ChannelMessage) => void>()
 
-  subscribeChannel(channelId: string, onMessage: (event: ChannelMessage) => void): void {
+  /** `since` di default = adesso (non replica la storia a ogni avvio/riconnessione). Passa `0` per
+   *  un canale appena scoperto (es. una DM aperta da altri) di cui vuoi comunque il backlog — un
+   *  messaggio arrivato prima che il bot se ne accorgesse altrimenti andrebbe perso per sempre. */
+  subscribeChannel(channelId: string, onMessage: (event: ChannelMessage) => void, since?: number): void {
     this.channelSubs.push({ channelId, onMessage })
-    this.sendSubscribeFrame(channelId, onMessage)
+    this.sendSubscribeFrame(channelId, onMessage, since)
   }
 
-  private sendSubscribeFrame(channelId: string, onMessage: (event: ChannelMessage) => void): void {
+  private sendSubscribeFrame(channelId: string, onMessage: (event: ChannelMessage) => void, since?: number): void {
     const subId = `channel-${channelId}-${Math.random().toString(36).slice(2, 8)}`
     this.onEventBySub.set(subId, onMessage)
-    const since = Math.floor(Date.now() / 1000)
+    const sinceEffettivo = since ?? Math.floor(Date.now() / 1000)
     this.ws?.send(
-      JSON.stringify(['REQ', subId, { kinds: [KIND_CHANNEL_MESSAGE], '#h': [channelId], since }]),
+      JSON.stringify(['REQ', subId, { kinds: [KIND_CHANNEL_MESSAGE], '#h': [channelId], since: sinceEffettivo }]),
+    )
+  }
+
+  private canaliScoperti = new Set<string>()
+  private onCanaleTrovatoCallback: ((channelId: string) => void) | null = null
+
+  /** Scopre tutti i canali (di gruppo o DM) di cui il bot è membro, sia quelli storici sia quelli
+   *  futuri — necessario perché una DM aperta da qualcun altro non ha un channel_id noto in
+   *  anticipo, a differenza del canale di gruppo configurato via env. Segue lo stesso pattern del
+   *  client desktop Buzz: kind:39002 (NIP-29 membri, storico) + kind:44100/44101 (notifiche di
+   *  membership, live) filtrati su '#p' = la mia pubkey. Va richiamato ad ogni riconnessione
+   *  (fatto da doConnect) perché il relay non ricorda le sottoscrizioni tra una connessione
+   *  websocket e l'altra. */
+  scopriCanali(onCanaleTrovato: (channelId: string) => void): void {
+    this.onCanaleTrovatoCallback = onCanaleTrovato
+    // I canali già sottoscritti esplicitamente (es. il canale di gruppo, sottoscritto a parte in
+    // index.ts) non vanno ri-scoperti: altrimenti si aprirebbe una seconda sottoscrizione
+    // sovrapposta sullo stesso canale, con risposte duplicate.
+    for (const sub of this.channelSubs) this.canaliScoperti.add(sub.channelId)
+
+    const gestisciCanaleTrovato = (channelId: string) => {
+      if (this.canaliScoperti.has(channelId)) return
+      this.canaliScoperti.add(channelId)
+      onCanaleTrovato(channelId)
+    }
+
+    const subStorico = `membri-${Math.random().toString(36).slice(2, 8)}`
+    this.onEventBySub.set(subStorico, (event) => {
+      const channelId = event.tags.find((t) => t[0] === 'd')?.[1]
+      if (channelId) gestisciCanaleTrovato(channelId)
+    })
+    this.ws?.send(JSON.stringify(['REQ', subStorico, { kinds: [KIND_NIP29_GROUP_MEMBERS], '#p': [this.pubkey] }]))
+
+    const subLive = `membership-${Math.random().toString(36).slice(2, 8)}`
+    this.onEventBySub.set(subLive, (event) => {
+      if (event.kind !== KIND_MEMBER_ADDED_NOTIFICATION) return
+      const channelId = event.tags.find((t) => t[0] === 'h')?.[1]
+      if (channelId) gestisciCanaleTrovato(channelId)
+    })
+    this.ws?.send(
+      JSON.stringify([
+        'REQ',
+        subLive,
+        { kinds: [KIND_MEMBER_ADDED_NOTIFICATION, KIND_MEMBER_REMOVED_NOTIFICATION], '#p': [this.pubkey] },
+      ]),
     )
   }
 

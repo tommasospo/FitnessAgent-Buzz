@@ -12,15 +12,28 @@ import { env } from './env.js'
 // sessione_eseguita, metrica_corporea, marker_ematico — l'agente non può
 // modificare un piano attivo né cancellare dati storici, per costruzione.
 
+// Molti modelli, per un campo facoltativo che non vogliono valorizzare, mandano `null` invece di
+// ometterlo del tutto — ma z.optional()/z.default() da soli accettano solo `undefined`, non
+// `null`. Il risultato è che la chiamata fallisce la validazione: l'errore torna al modello come
+// stringa dentro il risultato del tool (non un'eccezione, quindi invisibile nei log del bot), e il
+// modello può anche non accorgersene e riferire che l'azione è andata a buon fine quando invece
+// non ha scritto nulla. opz()/opzD() rendono un campo tollerante a entrambi.
+function opz<T extends z.ZodTypeAny>(schema: T) {
+  return schema.nullable().optional().transform((v) => v ?? undefined)
+}
+function opzD<T extends z.ZodTypeAny, D>(schema: T, valorePredefinito: D) {
+  return schema.nullable().optional().transform((v) => v ?? valorePredefinito)
+}
+
 const esercizioSchema = z
   .object({
     nome: z.string(),
     serie: z.number().int().positive(),
-    ripetizioni: z.number().int().positive().optional(),
-    secondi: z.number().int().positive().optional(),
-    carico: z.number().optional(),
-    recupero_secondi: z.number().int().optional(),
-    note: z.string().optional(),
+    ripetizioni: opz(z.number().int().positive()),
+    secondi: opz(z.number().int().positive()),
+    carico: opz(z.number()),
+    recupero_secondi: opz(z.number().int()),
+    note: opz(z.string()),
   })
   .refine((e) => (e.ripetizioni !== undefined) !== (e.secondi !== undefined), {
     message: 'Specifica esattamente uno tra ripetizioni e secondi (a seconda che l\'esercizio sia a ripetizioni o a tempo).',
@@ -39,7 +52,7 @@ const sessionePrescrittaInputSchema = z.object({
         "l'ultima sessione dello split, non un giorno di calendario fisso.",
     ),
   tipo: z.enum(['palestra', 'corsa', 'nuoto', 'altro']),
-  esercizi: z.array(esercizioSchema).default([]),
+  esercizi: opzD(z.array(esercizioSchema), []),
 })
 
 export const tools = [
@@ -78,7 +91,7 @@ export const tools = [
     description: 'Elenca le versioni precedenti (e la proposta corrente, se esiste) di un tipo di piano, più recenti prima.',
     inputSchema: {
       tipo: z.enum(['allenamento', 'nutrizione']),
-      limite: z.number().int().positive().max(50).default(10),
+      limite: opzD(z.number().int().positive().max(50), 10),
     },
     handler: async ({ tipo, limite }: { tipo: 'allenamento' | 'nutrizione'; limite: number }) => {
       const { data, error } = await supabase
@@ -95,9 +108,9 @@ export const tools = [
     name: 'leggi_log_allenamenti',
     description: 'Legge le sessioni effettivamente eseguite (il log), più recenti prima, con filtro opzionale di data.',
     inputSchema: {
-      da: z.string().optional().describe('Data ISO minima (inclusa)'),
-      a: z.string().optional().describe('Data ISO massima (inclusa)'),
-      limite: z.number().int().positive().max(100).default(20),
+      da: opz(z.string().describe('Data ISO minima (inclusa)')),
+      a: opz(z.string().describe('Data ISO massima (inclusa)')),
+      limite: opzD(z.number().int().positive().max(100), 20),
     },
     handler: async ({ da, a, limite }: { da?: string; a?: string; limite: number }) => {
       let query = supabase
@@ -116,10 +129,10 @@ export const tools = [
     name: 'leggi_metriche_corporee',
     description: 'Legge la serie storica delle metriche corporee (peso, circonferenze, massa grassa, ...).',
     inputSchema: {
-      tipo: z.enum(['peso', 'circonferenza', 'massa_grassa', 'altro']).optional(),
-      da: z.string().optional(),
-      a: z.string().optional(),
-      limite: z.number().int().positive().max(200).default(50),
+      tipo: opz(z.enum(['peso', 'circonferenza', 'massa_grassa', 'altro'])),
+      da: opz(z.string()),
+      a: opz(z.string()),
+      limite: opzD(z.number().int().positive().max(200), 50),
     },
     handler: async ({
       tipo,
@@ -145,10 +158,10 @@ export const tools = [
     name: 'leggi_marker_ematici',
     description: 'Legge la serie storica dei marker ematici (es. ferritina, vitamina D, colesterolo), con flag fuori_range.',
     inputSchema: {
-      marker: z.string().optional().describe('Nome esatto del marker, es. "ferritina"'),
-      da: z.string().optional(),
-      a: z.string().optional(),
-      limite: z.number().int().positive().max(200).default(50),
+      marker: opz(z.string().describe('Nome esatto del marker, es. "ferritina"')),
+      da: opz(z.string()),
+      a: opz(z.string()),
+      limite: opzD(z.number().int().positive().max(200), 50),
     },
     handler: async ({
       marker,
@@ -188,9 +201,9 @@ export const tools = [
     name: 'leggi_note_agente',
     description: 'Legge le annotazioni lasciate dagli agenti sul log o su altri record, più recenti prima.',
     inputSchema: {
-      destinatario_tipo: z.string().optional(),
-      destinatario_id: z.string().uuid().optional(),
-      limite: z.number().int().positive().max(200).default(50),
+      destinatario_tipo: opz(z.string()),
+      destinatario_id: opz(z.string().uuid()),
+      limite: opzD(z.number().int().positive().max(200), 50),
     },
     handler: async ({
       destinatario_tipo,
@@ -220,17 +233,18 @@ export const tools = [
         'Struttura libera del piano. Per nutrizione: { macro: { kcal, proteine_g, carboidrati_g, grassi_g }, note }.',
       ),
       motivazione: z.string(),
-      durata_settimane: z
-        .number()
-        .int()
-        .positive()
-        .optional()
-        .describe(
-          "Durata del piano in settimane a partire da quando l'utente lo attiva dall'app (non da ora). " +
-            'Facoltativa: lascia vuoto solo se il piano non ha davvero una scadenza pensata.',
-        ),
-      riferimento_thread_buzz: z.string().optional(),
-      sessioni: z.array(sessionePrescrittaInputSchema).default([]),
+      durata_settimane: opz(
+        z
+          .number()
+          .int()
+          .positive()
+          .describe(
+            "Durata del piano in settimane a partire da quando l'utente lo attiva dall'app (non da ora). " +
+              'Facoltativa: lascia vuoto solo se il piano non ha davvero una scadenza pensata.',
+          ),
+      ),
+      riferimento_thread_buzz: opz(z.string()),
+      sessioni: opzD(z.array(sessionePrescrittaInputSchema), []),
     },
     handler: async ({
       tipo,
@@ -347,8 +361,8 @@ export const tools = [
       'relazionale libera su chi ti sta parlando. Più recenti prima.',
     inputSchema: {
       pubkey_persona: z.string().describe('Pubkey Nostr della persona'),
-      categoria: memoriaCategoriaSchema.optional(),
-      limite: z.number().int().positive().max(50).default(20),
+      categoria: opz(memoriaCategoriaSchema),
+      limite: opzD(z.number().int().positive().max(50), 20),
     },
     handler: async ({
       pubkey_persona,
@@ -410,7 +424,7 @@ export const tools = [
     inputSchema: {
       tipo: z.enum(['check_settimanale', 'anomalia', 'chiarimento']),
       contenuto: z.string(),
-      riferimento_thread_buzz: z.string().optional(),
+      riferimento_thread_buzz: opz(z.string()),
     },
     handler: async ({
       tipo,
