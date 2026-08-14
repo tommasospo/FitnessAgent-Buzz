@@ -27,7 +27,15 @@ const esercizioSchema = z
   })
 
 const sessionePrescrittaInputSchema = z.object({
-  data_prevista: z.string().describe('Data ISO (YYYY-MM-DD)'),
+  giorno_numero: z
+    .number()
+    .int()
+    .positive()
+    .describe(
+      "Posizione della sessione nello split che si ripete (1, 2, 3, ...) — NON una data. L'utente sceglie da " +
+        "solo quando allenarsi: la sessione 'Giorno 1' è la prossima volta che si allena dopo aver completato " +
+        "l'ultima sessione dello split, non un giorno di calendario fisso.",
+    ),
   tipo: z.enum(['palestra', 'corsa', 'nuoto', 'altro']),
   esercizi: z.array(esercizioSchema).default([]),
 })
@@ -55,7 +63,7 @@ export const tools = [
           .from('sessione_prescritta')
           .select('*')
           .eq('piano_id', piano.id)
-          .order('data_prevista', { ascending: true })
+          .order('giorno_numero', { ascending: true })
         if (errSessioni) throw new Error(errSessioni.message)
         return { piano, sessioni_prescritte: sessioni }
       }
@@ -210,6 +218,15 @@ export const tools = [
         'Struttura libera del piano. Per nutrizione: { macro: { kcal, proteine_g, carboidrati_g, grassi_g }, note }.',
       ),
       motivazione: z.string(),
+      durata_settimane: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe(
+          "Durata del piano in settimane a partire da quando l'utente lo attiva dall'app (non da ora). " +
+            'Facoltativa: lascia vuoto solo se il piano non ha davvero una scadenza pensata.',
+        ),
       riferimento_thread_buzz: z.string().optional(),
       sessioni: z.array(sessionePrescrittaInputSchema).default([]),
     },
@@ -217,12 +234,14 @@ export const tools = [
       tipo,
       contenuto,
       motivazione,
+      durata_settimane,
       riferimento_thread_buzz,
       sessioni,
     }: {
       tipo: 'allenamento' | 'nutrizione'
       contenuto: Record<string, unknown>
       motivazione: string
+      durata_settimane?: number
       riferimento_thread_buzz?: string
       sessioni: z.infer<typeof sessionePrescrittaInputSchema>[]
     }) => {
@@ -241,6 +260,7 @@ export const tools = [
           versione: nuovaVersione,
           autore_agente: env.agentName,
           motivazione,
+          durata_settimane: durata_settimane ?? null,
           riferimento_thread_buzz: riferimento_thread_buzz ?? null,
           contenuto,
           piano_precedente_id: pianoAttivo?.id ?? null,
@@ -253,7 +273,7 @@ export const tools = [
         const { error: errSessioni } = await supabase.from('sessione_prescritta').insert(
           sessioni.map((s) => ({
             piano_id: piano.id,
-            data_prevista: s.data_prevista,
+            giorno_numero: s.giorno_numero,
             tipo: s.tipo,
             esercizi: s.esercizi,
           })),
@@ -289,7 +309,7 @@ export const tools = [
 
       const { data, error } = await supabase
         .from('sessione_prescritta')
-        .insert(sessioni.map((s) => ({ piano_id, data_prevista: s.data_prevista, tipo: s.tipo, esercizi: s.esercizi })))
+        .insert(sessioni.map((s) => ({ piano_id, giorno_numero: s.giorno_numero, tipo: s.tipo, esercizi: s.esercizi })))
         .select('*')
       if (error) throw new Error(error.message)
       return data

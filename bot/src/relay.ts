@@ -11,6 +11,7 @@ import { hexToBytes } from '@noble/hashes/utils'
 const KIND_PROFILE = 0
 const KIND_CHANNEL_MESSAGE = 9
 const KIND_AUTH = 22242
+const KIND_DM_OPEN = 41010
 
 export interface ChannelMessage {
   id: string
@@ -34,7 +35,7 @@ export class BuzzRelayClient {
   private secretKey: Uint8Array
   private pubkey: string
   private relayUrl: string
-  private pendingOk = new Map<string, { resolve: () => void; reject: (err: Error) => void }>()
+  private pendingOk = new Map<string, { resolve: (message: string) => void; reject: (err: Error) => void }>()
 
   // Stato ricordato per ripetere automaticamente auth -> profilo -> sottoscrizioni
   // dopo una riconnessione (il relay non mantiene queste cose tra una connessione
@@ -191,7 +192,7 @@ export class BuzzRelayClient {
       const pending = this.pendingOk.get(eventId)
       if (pending) {
         this.pendingOk.delete(eventId)
-        if (ok) pending.resolve()
+        if (ok) pending.resolve(message)
         else pending.reject(new Error(`Relay ha rifiutato l'evento ${eventId}: ${message}`))
       }
       return
@@ -208,7 +209,7 @@ export class BuzzRelayClient {
     }
   }
 
-  private publishRaw(event: Event, frameType: 'EVENT' | 'AUTH' = 'EVENT'): Promise<void> {
+  private publishRaw(event: Event, frameType: 'EVENT' | 'AUTH' = 'EVENT'): Promise<string> {
     return new Promise((resolve, reject) => {
       this.pendingOk.set(event.id, { resolve, reject })
       this.ws?.send(JSON.stringify([frameType, event]))
@@ -266,6 +267,40 @@ export class BuzzRelayClient {
       ['h', channelId],
       ['p', triggerEvent.pubkey],
     ]
+
+    const event = this.sign({
+      kind: KIND_CHANNEL_MESSAGE,
+      created_at: Math.floor(Date.now() / 1000),
+      tags,
+      content,
+    })
+    await this.publishRaw(event)
+  }
+
+  /** Apre (o riusa, se già esiste — open_dm è idempotente lato relay) una conversazione privata
+   *  1:1 con `pubkeyAltro`. Ritorna il channel_id: da lì in poi i messaggi si pubblicano come
+   *  kind:9 normali con tag 'h' = questo channel_id, esattamente come in un canale di gruppo. */
+  async apriDM(pubkeyAltro: string): Promise<string> {
+    const event = this.sign({
+      kind: KIND_DM_OPEN,
+      created_at: Math.floor(Date.now() / 1000),
+      tags: [['p', pubkeyAltro]],
+      content: '',
+    })
+    const message = await this.publishRaw(event)
+    const match = message.match(/^response:(\{.*\})$/)
+    if (!match) {
+      throw new Error(`Risposta inattesa aprendo la DM: "${message}"`)
+    }
+    const { channel_id } = JSON.parse(match[1]) as { channel_id: string }
+    return channel_id
+  }
+
+  /** Pubblica un messaggio proattivo (non in risposta a nulla) in un canale — usato sia per una DM
+   *  (channelId della conversazione privata) sia, in teoria, per un canale di gruppo. */
+  async inviaMessaggio(channelId: string, content: string, destinatarioPubkey?: string): Promise<void> {
+    const tags: string[][] = [['h', channelId]]
+    if (destinatarioPubkey) tags.push(['p', destinatarioPubkey])
 
     const event = this.sign({
       kind: KIND_CHANNEL_MESSAGE,

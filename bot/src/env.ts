@@ -17,6 +17,10 @@ export const env = {
   openaiModel: process.env.OPENAI_MODEL ?? 'gpt-5.6-luna',
   supabaseUrl: required('SUPABASE_URL'),
   supabaseServiceRoleKey: required('SUPABASE_SERVICE_ROLE_KEY'),
+  // Pubkey Nostr della persona umana proprietaria del progetto (PRD: utente unico, nessuna
+  // multi-tenancy) — serve al check-in settimanale per aprire una DM di propria iniziativa,
+  // senza dover aspettare un evento in arrivo da cui ricavarla.
+  ownerPubkey: required('OWNER_PUBKEY'),
   // Pubkey di eventuali altri agenti bot nello stesso canale (non segreta, è pubblica).
   // Usata per non rispondere spontaneamente ai loro messaggi (solo su menzione esplicita),
   // altrimenti due agenti che si sentono entrambi "in causa" potrebbero rispondersi all'infinito.

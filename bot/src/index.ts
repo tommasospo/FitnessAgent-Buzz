@@ -3,6 +3,7 @@ import { env } from './env.js'
 import { BuzzRelayClient, type ChannelMessage } from './relay.js'
 import { loadPersona } from './persona.js'
 import { rispondi, dovreiRispondere } from './llm.js'
+import { avviaSchedulerCheckin } from './checkin.js'
 
 const systemPrompt = loadPersona(env.personaPath)
 
@@ -45,6 +46,8 @@ async function main() {
     handleEvent(event).catch((err) => console.error(`[${env.agentName}] errore gestendo evento:`, err))
   })
   console.log(`[${env.agentName}] in ascolto sul canale ${env.channelId}`)
+
+  avviaSchedulerCheckin(client, systemPrompt, () => cronologiaCanale)
 }
 
 async function handleEvent(event: ChannelMessage) {
