@@ -56,9 +56,13 @@ export async function dovreiRispondere(systemPrompt: string, cronologia: ChatCom
     {
       role: 'user',
       content:
-        "Non sei stato menzionato esplicitamente nell'ultimo messaggio. In base al tuo ruolo, ti senti " +
-        "comunque chiamato in causa e vuoi intervenire spontaneamente? Rispondi SOLO 'SI' o 'NO', nessun altro testo. " +
-        "Nel dubbio rispondi 'NO'.",
+        "Non sei stato menzionato esplicitamente (nessun tag) nell'ultimo messaggio. Prima domanda: il messaggio si " +
+        "rivolge chiaramente, per nome o ruolo, a un'altra persona o a un altro agente specifico (es. \"nutrizionista, " +
+        '...", "PT, ...", un nome proprio diverso dal tuo)? Se sì, e non c\'è un motivo tecnico forte per cui riguardi ' +
+        "anche te, rispondi 'NO' — non è una decisione tua da rimettere in discussione, anche se l'argomento in " +
+        "astratto rientrerebbe nel tuo ruolo. Solo se il messaggio non è chiaramente rivolto a qualcun altro: in base " +
+        "al tuo ruolo, ti senti comunque chiamato in causa e vuoi intervenire spontaneamente? Rispondi SOLO 'SI' o " +
+        "'NO', nessun altro testo. Nel dubbio rispondi 'NO'.",
     },
   ]
 
