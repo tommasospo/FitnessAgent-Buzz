@@ -56,13 +56,19 @@ export async function dovreiRispondere(systemPrompt: string, cronologia: ChatCom
     {
       role: 'user',
       content:
-        "Non sei stato menzionato esplicitamente (nessun tag) nell'ultimo messaggio. Prima domanda: il messaggio si " +
-        "rivolge chiaramente, per nome o ruolo, a un'altra persona o a un altro agente specifico (es. \"nutrizionista, " +
-        '...", "PT, ...", un nome proprio diverso dal tuo)? Se sì, e non c\'è un motivo tecnico forte per cui riguardi ' +
-        "anche te, rispondi 'NO' — non è una decisione tua da rimettere in discussione, anche se l'argomento in " +
-        "astratto rientrerebbe nel tuo ruolo. Solo se il messaggio non è chiaramente rivolto a qualcun altro: in base " +
-        "al tuo ruolo, ti senti comunque chiamato in causa e vuoi intervenire spontaneamente? Rispondi SOLO 'SI' o " +
-        "'NO', nessun altro testo. Nel dubbio rispondi 'NO'.",
+        "Non sei stato menzionato esplicitamente (nessun tag) nell'ultimo messaggio. Prima di decidere, guarda gli " +
+        "ultimi messaggi della cronologia qui sopra, non solo l'ultimo isolato. Rispondi 'NO' se anche solo una di " +
+        "queste è vera: " +
+        '(a) l\'ultimo messaggio si rivolge chiaramente, per nome o ruolo, a un\'altra persona o a un altro agente ' +
+        'specifico (es. "nutrizionista, ...", "PT, ...", un nome proprio diverso dal tuo); ' +
+        '(b) l\'ultimo messaggio è chiaramente una risposta o la continuazione di uno scambio in corso con un altro ' +
+        'agente specifico — es. l\'altro agente ha appena fatto una domanda o un elenco di domande nei messaggi ' +
+        'immediatamente precedenti, e questo messaggio sembra rispondere proprio a quelle (anche con risposte ' +
+        'brevi e senza nominare nessuno esplicitamente, tipo una sequenza di dati in risposta a una lista numerata). ' +
+        "In entrambi i casi la scelta di chi debba rispondere non è ambigua e non spetta a te, anche se l'argomento " +
+        "in astratto rientrerebbe nel tuo ruolo. Solo se nessuna delle due si applica: in base al tuo ruolo, ti " +
+        "senti comunque chiamato in causa e vuoi intervenire spontaneamente? Rispondi SOLO 'SI' o 'NO', nessun " +
+        "altro testo. Nel dubbio rispondi 'NO'.",
     },
   ]
 
