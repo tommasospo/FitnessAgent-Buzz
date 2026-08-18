@@ -33,6 +33,17 @@ const esercizioSchema = z
     secondi: opz(z.number().int().positive()),
     carico: opz(z.number()),
     recupero_secondi: opz(z.number().int()),
+    tecnica: opz(
+      z
+        .enum(['superset', 'piramidale', 'stripping', 'cedimento'])
+        .describe(
+          "Etichetta della tecnica, mostrata come badge in app. Solo un tag: la progressione numerica " +
+            "(es. i pesi di un piramidale, i drop di uno stripping) va scritta in `note`, non c'è uno " +
+            "schema per-serie a parte. Per un superset, tagga con 'superset' TUTTI gli esercizi del blocco " +
+            "e scrivili CONSECUTIVI nell'array `esercizi`: l'app li raggruppa in base all'adiacenza, non " +
+            "serve un id di gruppo.",
+        ),
+    ),
     note: opz(z.string()),
   })
   .refine((e) => (e.ripetizioni !== undefined) !== (e.secondi !== undefined), {
@@ -51,8 +62,28 @@ const sessionePrescrittaInputSchema = z.object({
         "solo quando allenarsi: la sessione 'Giorno 1' è la prossima volta che si allena dopo aver completato " +
         "l'ultima sessione dello split, non un giorno di calendario fisso.",
     ),
-  tipo: z.enum(['palestra', 'corsa', 'nuoto', 'altro']),
+  tipo: z.enum(['palestra', 'corsa', 'nuoto', 'bici', 'altro']),
   esercizi: opzD(z.array(esercizioSchema), []),
+  durata_minuti_suggerita: opz(
+    z
+      .number()
+      .int()
+      .positive()
+      .describe(
+        "Per sessioni non da palestra: durata suggerita in minuti. Facoltativa — lasciala vuota per " +
+          "un'indicazione volutamente generica (es. 'una corsa a settimana', senza tempi o intervalli).",
+      ),
+  ),
+  distanza_km_suggerita: opz(z.number().positive().describe('Come durata_minuti_suggerita ma in km, facoltativa.')),
+  zona_frequenza_cardiaca: opz(
+    z
+      .string()
+      .describe(
+        "Indicazione di intensità mostrata IN SCHEDA (non solo a voce in chat), es. \"128-145 bpm (Zona 2)\". " +
+          'Usala quando daresti un\'indicazione di intensità: ha più valore lì che in una frase in chat che si perde.',
+      ),
+  ),
+  note: opz(z.string().describe("Nota libera a livello di sessione (non del singolo esercizio) — utile soprattutto per sessioni senza esercizi (corsa/nuoto/bici).")),
 })
 
 export const tools = [
@@ -198,6 +229,20 @@ export const tools = [
     },
   },
   {
+    name: 'leggi_profilo_utente',
+    description:
+      "Legge i dati generali che l'utente ha inserito lui stesso nell'app (altezza, data di nascita, sesso, " +
+      "livello di esperienza, allergie/intolleranze, infortuni pregressi, note) così da non doverli richiedere " +
+      "di nuovo in chat. Il peso NON è qui: è una serie storica, usa leggi_metriche_corporee. Ritorna null se " +
+      "l'utente non ha ancora compilato nulla.",
+    inputSchema: {},
+    handler: async () => {
+      const { data, error } = await supabase.from('profilo_utente').select('*').maybeSingle()
+      if (error) throw new Error(error.message)
+      return data
+    },
+  },
+  {
     name: 'leggi_note_agente',
     description: 'Legge le annotazioni lasciate dagli agenti sul log o su altri record, più recenti prima.',
     inputSchema: {
@@ -292,6 +337,10 @@ export const tools = [
             giorno_numero: s.giorno_numero,
             tipo: s.tipo,
             esercizi: s.esercizi,
+            durata_minuti_suggerita: s.durata_minuti_suggerita ?? null,
+            distanza_km_suggerita: s.distanza_km_suggerita ?? null,
+            zona_frequenza_cardiaca: s.zona_frequenza_cardiaca ?? null,
+            note: s.note ?? null,
           })),
         )
         if (errSessioni) throw new Error(errSessioni.message)
@@ -325,10 +374,100 @@ export const tools = [
 
       const { data, error } = await supabase
         .from('sessione_prescritta')
-        .insert(sessioni.map((s) => ({ piano_id, giorno_numero: s.giorno_numero, tipo: s.tipo, esercizi: s.esercizi })))
+        .insert(
+          sessioni.map((s) => ({
+            piano_id,
+            giorno_numero: s.giorno_numero,
+            tipo: s.tipo,
+            esercizi: s.esercizi,
+            durata_minuti_suggerita: s.durata_minuti_suggerita ?? null,
+            distanza_km_suggerita: s.distanza_km_suggerita ?? null,
+            zona_frequenza_cardiaca: s.zona_frequenza_cardiaca ?? null,
+            note: s.note ?? null,
+          })),
+        )
         .select('*')
       if (error) throw new Error(error.message)
       return data
+    },
+  },
+  {
+    name: 'modifica_proposta',
+    description:
+      "Modifica una proposta di piano ESISTENTE ancora in stato 'proposta' (non attiva): aggiorna contenuto/motivazione/durata " +
+      "e/o sostituisce le sessioni prescritte, invece di dover buttare via e ricreare da zero con proponi_piano ogni volta " +
+      "che cambia un dettaglio prima che l'utente approvi. Se passi `sessioni`, SOSTITUISCE integralmente le sessioni " +
+      "esistenti del piano (non le aggiunge: per aggiungerne senza toccare le altre usa proponi_sessioni). " +
+      "Fallisce se il piano è già attivo o archiviato: in quel caso serve una nuova proposta con proponi_piano.",
+    inputSchema: {
+      piano_id: z.string().uuid(),
+      contenuto: opz(z.record(z.any())),
+      motivazione: opz(z.string()),
+      durata_settimane: opz(z.number().int().positive()),
+      sessioni: opz(z.array(sessionePrescrittaInputSchema)),
+    },
+    handler: async ({
+      piano_id,
+      contenuto,
+      motivazione,
+      durata_settimane,
+      sessioni,
+    }: {
+      piano_id: string
+      contenuto?: Record<string, unknown>
+      motivazione?: string
+      durata_settimane?: number
+      sessioni?: z.infer<typeof sessionePrescrittaInputSchema>[]
+    }) => {
+      const { data: piano, error: errPiano } = await supabase.from('piano').select('stato').eq('id', piano_id).single()
+      if (errPiano) throw new Error(errPiano.message)
+      if (piano.stato !== 'proposta') {
+        throw new Error(
+          `Il piano è in stato "${piano.stato}", non "proposta": non puoi modificarlo. Crea una nuova proposta con proponi_piano.`,
+        )
+      }
+
+      const aggiornamenti: Record<string, unknown> = {}
+      if (contenuto !== undefined) aggiornamenti.contenuto = contenuto
+      if (motivazione !== undefined) aggiornamenti.motivazione = motivazione
+      if (durata_settimane !== undefined) aggiornamenti.durata_settimane = durata_settimane
+
+      let pianoAggiornato = null
+      if (Object.keys(aggiornamenti).length > 0) {
+        const { data, error } = await supabase.from('piano').update(aggiornamenti).eq('id', piano_id).select('*').single()
+        if (error) throw new Error(error.message)
+        pianoAggiornato = data
+      }
+
+      let sessioniAggiornate: unknown[] | null = null
+      if (sessioni !== undefined) {
+        const { error: errDelete } = await supabase.from('sessione_prescritta').delete().eq('piano_id', piano_id)
+        if (errDelete) throw new Error(errDelete.message)
+
+        if (sessioni.length > 0) {
+          const { data, error: errInsert } = await supabase
+            .from('sessione_prescritta')
+            .insert(
+          sessioni.map((s) => ({
+            piano_id,
+            giorno_numero: s.giorno_numero,
+            tipo: s.tipo,
+            esercizi: s.esercizi,
+            durata_minuti_suggerita: s.durata_minuti_suggerita ?? null,
+            distanza_km_suggerita: s.distanza_km_suggerita ?? null,
+            zona_frequenza_cardiaca: s.zona_frequenza_cardiaca ?? null,
+            note: s.note ?? null,
+          })),
+        )
+            .select('*')
+          if (errInsert) throw new Error(errInsert.message)
+          sessioniAggiornate = data
+        } else {
+          sessioniAggiornate = []
+        }
+      }
+
+      return { piano: pianoAggiornato, sessioni: sessioniAggiornate }
     },
   },
   {
